@@ -11,6 +11,16 @@ URL_REPO_CORE=$(echo "$URL_PATH_PARTS" | cut -d '/' -f 1,2 | sed 's#/$##')
 REPO=$(echo $URL_REPO_CORE | cut -d '/' -f 2 | sed 's/\.git$//')
 REPO_URL="${URL_PROTOCOL}${URL_DOMAIN}/${URL_REPO_CORE}"
 
+# GitHub token 支持:依次尝试 GITHUB_TOKEN / GH_TOKEN。
+# 只对 github.com 生效;token 不写入 .git/config,
+# 仅在 fetch 命令行中临时使用,避免凭据落盘。
+GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+FETCH_URL="${REPO_URL}"
+if [[ -n "${GH_TOKEN}" && "${URL_DOMAIN}" == "github.com" ]]; then
+    FETCH_URL="${URL_PROTOCOL}x-access-token:${GH_TOKEN}@${URL_DOMAIN}/${URL_REPO_CORE}"
+    echo "使用 GitHub token 认证拉取 ${URL_DOMAIN}/${URL_REPO_CORE}"
+fi
+
 retry() {
     local max_attempts=$1; shift
     local sleep_seconds=$1; shift
@@ -25,7 +35,8 @@ retry() {
         sleep "$sleep_seconds"
     done
 
-    echo "Command failed after $max_attempts attempts: $*" >&2
+    # 不回显完整命令,避免把带 token 的 URL 打进日志
+    echo "Command failed after $max_attempts attempts." >&2
     return 1
 }
 
@@ -63,8 +74,9 @@ pushd ${TEMP_DIR}
 git init .
 git config user.email rvci@isrc.iscas.ac.cn
 git config user.name rvci
+# remote 保存不带 token 的 URL,防止凭据泄漏到 .git/config
 git remote add origin "${REPO_URL}"
-retry 10 30 git fetch origin "$fetch_ref":"$fetch_ref" --depth=1
+retry 10 30 git fetch "${FETCH_URL}" "$fetch_ref":"$fetch_ref" --depth=1
 git checkout $fetch_ref
 
 git_commit=$(git rev-parse HEAD)
